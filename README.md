@@ -1,8 +1,8 @@
 # FloodEvac Web — Sistem Visualisasi Rute Evakuasi Tanggap Banjir
 
-**FloodEvac Web** adalah aplikasi web interaktif berbasis **Laravel + Inertia.js + Vue 3 + Leaflet** yang dirancang untuk memvisualisasikan rute evakuasi tanggap banjir (*Flood-Aware Evacuation Routes*) dan analisis keterjangkauan fasilitas evakuasi di Kota Medan berdasarkan simulasi skenario genangan banjir (**Moderate** dan **Severe**).
+**FloodEvac Web** adalah aplikasi web interaktif berbasis **Vue 3 + Vite + Leaflet + Tailwind CSS** yang dirancang untuk memvisualisasikan rute evakuasi tanggap banjir (*Flood-Aware Evacuation Routes*) dan analisis keterjangkauan fasilitas evakuasi di Kota Medan berdasarkan simulasi skenario genangan banjir (**Moderate** dan **Severe**).
 
-Seluruh hasil analisis dan rute evakuasi bersumber dari komputasi ilmiah *Python FloodEvac engine* yang telah divalidasi dan disajikan sebagai artefak web statis performa tinggi tanpa dependensi API tambahan.
+Seluruh hasil analisis dan rute evakuasi bersumber dari komputasi ilmiah *Python FloodEvac engine* yang disajikan sebagai artefak web statis performa tinggi tanpa dependensi backend/API server.
 
 ---
 
@@ -22,18 +22,18 @@ Seluruh hasil analisis dan rute evakuasi bersumber dari komputasi ilmiah *Python
 - **Perbandingan Skenario Rute (Moderate vs Severe)**:
   - Mode **Compare Both** membandingkan rute skenario Moderate (garis biru solid) dan Severe (garis merah putus-putus) secara bersamaan pada destinasi yang sama.
   - Analisis perbedaan jarak (`+XX m`), selisih waktu tempuh (`+XX detik`), dan indikasi perubahan jalur atau kehilangan aksesibilitas (*became unreachable*).
-- **Arsitektur Tanpa API Server-Side (Static Delivery)**: DataGeoJSON dan indeks rute dimuat secara efisien melalui *lazy-loading* langsung dari folder `public/data/` ke memori peramban (browser caching).
+- **Arsitektur Standalone Single Page Application (Pure Frontend)**: Data GeoJSON dan indeks rute dimuat secara efisien melalui *lazy-loading* langsung dari folder `public/data/` ke memori peramban tanpa memerlukan backend API server atau database.
 
 ---
 
 ## 🛠️ Teknologi yang Digunakan
 
-- **Backend**: [Laravel 12](https://laravel.com/) (PHP 8.5 / 8.2+)
-- **Frontend SPA**: [Inertia.js v3](https://inertiajs.com/) + [Vue 3](https://vuejs.org/) (Composition API & `<script setup>`)
-- **Bahasa**: [TypeScript](https://www.typescriptlang.org/) & PHP
+- **Frontend Core**: [Vue 3](https://vuejs.org/) (Composition API & `<script setup>`) + [Vite](https://vite.dev/)
+- **Bahasa**: [TypeScript](https://www.typescriptlang.org/)
 - **Peta & GIS**: [Leaflet.js](https://leafletjs.com/)
-- **Desain & Styling**: [Tailwind CSS](https://tailwindcss.com/)
-- **Testing & Quality Assurance**: [Pest PHP](https://pestphp.com/), Vue-TSC, ESLint, Prettier, Laravel Pint
+- **Desain & Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
+- **Testing**: [Vitest](https://vitest.dev/)
+- **Linting & Code Quality**: Vue-TSC, ESLint, Oxlint, Prettier
 
 ---
 
@@ -60,102 +60,45 @@ public/data/
 
 ---
 
-## 🚀 Petunjuk Instalasi & Memulai Proyek
+## 🚀 Petunjuk Pengoperasian
 
 ### 1. Prasyarat Sistem
-Pastikan lingkungan pengembangan Anda telah terpasang:
-- **PHP** >= 8.2 (disarankan PHP 8.5)
-- **Composer** >= 2.x
 - **Node.js** >= 20.x
 - **pnpm** (atau npm / yarn)
 
-### 2. Langkah-langkah Penginstalan
+### 2. Langkah-langkah Penginstalan & Jalankan Server Pengembang
 
-1. **Clone repository ini**:
-   ```bash
-   git clone <repository-url>
-   cd floodevac-web
-   ```
+```bash
+# 1. Install dependensi
+pnpm install
 
-2. **Install dependensi PHP**:
-   ```bash
-   composer install
-   ```
+# 2. Jalankan Vite dev server
+pnpm run dev
+```
 
-3. **Install dependensi Node.js / Frontend**:
-   ```bash
-   pnpm install
-   ```
-
-4. **Konfigurasi Lingkungan (`.env`)**:
-   Salin file contoh konfigurasi dan generate application key:
-   ```bash
-   cp .env.example .env
-   php artisan key:generate
-   ```
-
-5. **Jalankan Server Pengembang (Development Server)**:
-   Anda dapat menjalankan server backend dan bundler frontend sekaligus dengan perintah:
-   ```bash
-   php artisan dev
-   ```
-   *Atau jalankan secara terpisah di dua terminal:*
-   ```bash
-   # Terminal 1: PHP server
-   php artisan serve
-
-   # Terminal 2: Vite dev server
-   pnpm run dev
-   ```
-
-6. **Buka Aplikasi di Peramban**:
-   Akses dashboard peta di:
-   `http://localhost:8000/floodevac`
+Akses aplikasi di browser pada alamat yang ditampilkan Vite (biasanya `http://localhost:5173`).
 
 ---
 
 ## 🧪 Pengujian & Penjaminan Mutu (Quality Assurance)
 
-Repository ini dilengkapi dengan pengujian otomatis untuk memvalidasi integritas file data statis dan fungsionalitas aplikasi.
-
-### Jalankan Tes Pest PHP:
 ```bash
-./vendor/bin/pest
-```
+# Jalankan pengujian unit & integritas data statis (Vitest)
+pnpm run test:run
 
-### Jalankan Pemeriksaan Tipe TypeScript:
-```bash
-pnpm run types:check
-```
+# Jalankan pemeriksaan tipe TypeScript
+pnpm run type-check
 
-### Jalankan Pemeriksaan Format Code & Linting:
-```bash
-pnpm run format:check
-pnpm run lint:check
-```
-
-### Build Aset Produksi:
-```bash
+# Build bundel produksi
 pnpm run build
-```
-
-### Jalankan Seluruh Verifikasi (One-Liner):
-```bash
-pnpm run build && pnpm run types:check && pnpm run format:check && pnpm run lint:check && ./vendor/bin/pest
 ```
 
 ---
 
 ## 🏛️ Catatan Arsitektur & Terminologi Ilmiah
 
-- **Tidak Ada Database / Controller API**: Aplikasi ini tidak menggunakan tabel database atau endpoint API controller Laravel untuk menyajikan rute/destinasi. Seluruh data disajikan secara statis dari folder `public/data/` untuk menjamin kecepatan dan keandalan di lapangan.
+- **100% Client-Side / Tanpa Backend**: Seluruh data disajikan secara statis dari folder `public/data/` untuk menjamin kecepatan, performa tinggi, dan keandalan di lapangan saat koneksi server terganggu.
 - **Terminologi Resmi**:
-  - Destinasi dinamakan *"Potential Evacuation Destination"* atau *"Emergency Facility"*. (Bukan *"Official Shelter"* atau *"Guaranteed Shelter"*).
+  - Destinasi dinamakan *"Potential Evacuation Destination"* atau *"Emergency Facility"*.
   - Rute dinamakan *"Flood-Aware Route"*.
 - **Pemisahan Keamanan vs Keterjangkauan**: Status keamanan lokasi destinasi (*Destination Safety*: `SAFE`, `AT_RISK`, `FLOODED`) dan keterjangkauan jalur rute (*Route Accessibility*: `REACHABLE`, `UNREACHABLE`) ditampilkan secara terpisah dan eksplisit.
-
----
-
-## 📄 Lisensi
-
-Proyek ini dikembangkan sebagai bagian dari partisipasi lomba GEMASTIK XIX 2026.
