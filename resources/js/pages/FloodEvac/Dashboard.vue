@@ -2,6 +2,7 @@
 import { Head } from '@inertiajs/vue3';
 import { computed, onMounted, ref, watch } from 'vue';
 import DestinationFilter from '@/components/flood/DestinationFilter.vue';
+import DestinationSearch from '@/components/flood/DestinationSearch.vue';
 import FloodLegend from '@/components/flood/FloodLegend.vue';
 import FloodMap from '@/components/flood/FloodMap.vue';
 import RouteComparisonCard from '@/components/flood/RouteComparison.vue';
@@ -26,6 +27,7 @@ const selectedSafetyFilter = ref<DestinationSafetyFilterValue>('ALL');
 const selectedCategoryFilter = ref<DestinationCategoryValue>('ALL');
 const showFloodRaster = ref<boolean>(true);
 const showRoute = ref<boolean>(true);
+const selectedDestinationId = ref<string | null>(null);
 
 const allDestinations = ref<DestinationFeature[]>([]);
 const loading = ref<boolean>(true);
@@ -234,7 +236,6 @@ async function loadScenarioRoute(scenario: FloodScenario): Promise<void> {
         const geojson: RouteGeoJSON = await geoRes.json();
         const metadata: RouteMetadata = await metaRes.json();
 
-        // Runtime validation
         if (
             !geojson ||
             geojson.type !== 'FeatureCollection' ||
@@ -257,9 +258,26 @@ async function loadScenarioRoute(scenario: FloodScenario): Promise<void> {
     }
 }
 
+function handleSelectDestination(facilityId: string): void {
+    selectedDestinationId.value = facilityId;
+}
+
 watch(selectedScenario, (newScenario) => {
     loadScenarioRaster(newScenario);
     loadScenarioRoute(newScenario);
+});
+
+// Clear selectedDestinationId if filters exclude it
+watch([selectedSafetyFilter, selectedCategoryFilter, selectedScenario], () => {
+    if (selectedDestinationId.value) {
+        const stillVisible = filteredDestinations.value.some(
+            (f) => f.properties.facility_id === selectedDestinationId.value,
+        );
+
+        if (!stillVisible) {
+            selectedDestinationId.value = null;
+        }
+    }
 });
 
 onMounted(() => {
@@ -274,11 +292,11 @@ onMounted(() => {
     <Head title="FloodEvac Dashboard" />
 
     <div
-        class="flex h-screen w-screen flex-col overflow-hidden bg-slate-950 text-slate-100"
+        class="flex h-screen w-screen flex-col overflow-x-hidden bg-slate-950 text-slate-100 lg:flex-row"
     >
-        <!-- Top Navbar -->
+        <!-- Top Navbar (Mobile Header) -->
         <header
-            class="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900/90 px-5 shadow-md backdrop-blur"
+            class="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900/90 px-5 shadow-md backdrop-blur lg:hidden"
         >
             <div class="flex items-center space-x-3">
                 <div
@@ -291,14 +309,14 @@ onMounted(() => {
                         FloodEvac
                     </h1>
                     <p class="text-[10px] text-slate-400">
-                        Flood-Aware Evacuation Routing System
+                        Evacuation Routing System
                     </p>
                 </div>
             </div>
 
-            <div class="flex items-center space-x-3">
+            <div class="flex items-center space-x-2">
                 <div
-                    class="flex items-center space-x-2 rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-xs shadow-inner"
+                    class="flex items-center space-x-1.5 rounded-full border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs shadow-inner"
                 >
                     <span class="text-slate-400">Scenario:</span>
                     <span
@@ -312,205 +330,237 @@ onMounted(() => {
                         {{ scenarioDisplayLabel }}
                     </span>
                 </div>
-                <div class="text-xs text-slate-400">Medan Viewport</div>
             </div>
         </header>
 
-        <!-- Main Content Area -->
-        <div class="flex min-h-0 flex-1">
-            <!-- Sidebar / Control Panel -->
-            <aside
-                class="flex w-80 shrink-0 flex-col space-y-4 overflow-y-auto border-r border-slate-800 bg-slate-900/60 p-4 lg:w-96"
+        <!-- Sidebar / Control Panel -->
+        <aside
+            class="order-2 flex w-full flex-col space-y-4 overflow-y-auto border-r border-slate-800 bg-slate-900/60 p-4 lg:order-1 lg:h-full lg:w-96 lg:shrink-0"
+        >
+            <!-- Desktop Header -->
+            <div
+                class="hidden items-center space-x-3 border-b border-slate-800 pb-3 lg:flex"
             >
-                <div class="border-b border-slate-800 pb-2">
-                    <h2
-                        class="text-xs font-semibold tracking-wider text-slate-400 uppercase"
-                    >
-                        Control Panel
-                    </h2>
-                </div>
-
-                <!-- Scenario Selector -->
-                <ScenarioSelector v-model="selectedScenario" />
-
-                <!-- Flood Overlay Toggle Card -->
                 <div
-                    class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
+                    class="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 font-bold text-white shadow-lg shadow-blue-600/30"
                 >
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <h3
-                                class="text-sm font-semibold tracking-wider text-slate-300 uppercase"
-                            >
-                                Flood Hazard Overlay
-                            </h3>
-                            <p class="text-xs text-slate-400">
-                                Toggle flood depth raster layer
-                            </p>
-                        </div>
-                        <label
-                            class="relative inline-flex cursor-pointer items-center"
-                        >
-                            <input
-                                v-model="showFloodRaster"
-                                type="checkbox"
-                                class="peer sr-only"
-                            />
-                            <div
-                                class="peer h-6 w-11 rounded-full bg-slate-700 peer-checked:bg-blue-600 peer-focus:outline-none after:absolute after:top-0.5 after:left-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"
-                            ></div>
-                        </label>
-                    </div>
+                    FE
                 </div>
+                <div>
+                    <h1 class="text-base font-bold tracking-tight text-white">
+                        FloodEvac
+                    </h1>
+                    <p class="text-[10px] text-slate-400">
+                        Flood-Aware Evacuation Routing System
+                    </p>
+                </div>
+            </div>
 
-                <!-- Scenario Information Card -->
-                <div
-                    class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
+            <div
+                class="flex items-center justify-between border-b border-slate-800 pb-2"
+            >
+                <h2
+                    class="text-xs font-semibold tracking-wider text-slate-400 uppercase"
                 >
-                    <div class="flex items-center justify-between">
+                    Control Panel
+                </h2>
+                <span class="hidden text-xs text-slate-400 lg:inline"
+                    >Medan Viewport</span
+                >
+            </div>
+
+            <!-- 1. Scenario Selector -->
+            <ScenarioSelector v-model="selectedScenario" />
+
+            <!-- 2. Flood Hazard Overlay Toggle Card -->
+            <div
+                class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
+            >
+                <div class="flex items-center justify-between">
+                    <div>
                         <h3
                             class="text-sm font-semibold tracking-wider text-slate-300 uppercase"
                         >
-                            Scenario Information
+                            Flood Hazard Overlay
                         </h3>
+                        <p class="text-xs text-slate-400">
+                            Toggle flood depth raster layer
+                        </p>
+                    </div>
+                    <label
+                        class="relative inline-flex cursor-pointer items-center"
+                    >
+                        <input
+                            v-model="showFloodRaster"
+                            type="checkbox"
+                            class="peer sr-only"
+                        />
+                        <div
+                            class="peer h-6 w-11 rounded-full bg-slate-700 peer-checked:bg-blue-600 peer-focus:outline-none after:absolute after:top-0.5 after:left-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white"
+                        ></div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 3. Scenario Information Card -->
+            <div
+                class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
+            >
+                <div class="flex items-center justify-between">
+                    <h3
+                        class="text-sm font-semibold tracking-wider text-slate-300 uppercase"
+                    >
+                        Scenario Information
+                    </h3>
+                    <span
+                        class="rounded bg-slate-700 px-2 py-0.5 text-[10px] text-slate-300 capitalize"
+                    >
+                        {{ scenarioDisplayLabel }}
+                    </span>
+                </div>
+
+                <div class="mt-3 space-y-2">
+                    <div>
                         <span
-                            class="rounded bg-slate-700 px-2 py-0.5 text-[10px] text-slate-300 capitalize"
+                            class="block text-[11px] font-medium text-slate-400"
                         >
-                            {{ scenarioDisplayLabel }}
+                            Modeled maximum depth
+                        </span>
+                        <span class="text-xl font-extrabold text-white">
+                            {{ modeledMaxDepthDisplay }}
                         </span>
                     </div>
+                    <p class="text-[11px] leading-tight text-slate-400">
+                        Modeled flood depth visualization. Authoritative
+                        scientific data.
+                    </p>
+                </div>
+            </div>
 
-                    <div class="mt-3 space-y-2">
-                        <div>
-                            <span
-                                class="block text-[11px] font-medium text-slate-400"
-                            >
-                                Modeled maximum depth
+            <!-- 4. Route Control Component -->
+            <RouteControl
+                v-model:show-route="showRoute"
+                :scenario="selectedScenario"
+                :metadata="activeRouteMetadata"
+                :comparison="routeComparisonData"
+                :loading="routeLoading"
+                :error="routeError"
+            />
+
+            <!-- 5. Route Scenario Comparison Component (Collapsible) -->
+            <RouteComparisonCard
+                :comparison="routeComparisonData"
+                :moderate-metadata="routeCache.moderate?.metadata || null"
+                :severe-metadata="routeCache.severe?.metadata || null"
+            />
+
+            <!-- 6. Evacuation Destinations Search & Counter Card -->
+            <div
+                class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
+            >
+                <div class="flex items-center justify-between">
+                    <h3
+                        class="text-sm font-semibold tracking-wider text-slate-300 uppercase"
+                    >
+                        Evacuation Destinations
+                    </h3>
+                    <span
+                        v-if="loading"
+                        class="rounded bg-slate-700 px-2 py-0.5 text-[10px] text-slate-300"
+                    >
+                        Loading...
+                    </span>
+                    <span
+                        v-else-if="error"
+                        class="rounded bg-rose-900/80 px-2 py-0.5 text-[10px] text-rose-200"
+                    >
+                        Error
+                    </span>
+                    <span
+                        v-else
+                        class="rounded border border-blue-800 bg-blue-950 px-2 py-0.5 text-[10px] font-semibold text-blue-300"
+                    >
+                        GeoJSON
+                    </span>
+                </div>
+
+                <div class="mt-3 space-y-3">
+                    <div
+                        v-if="loading"
+                        class="animate-pulse text-xs text-slate-400"
+                    >
+                        Loading destination data...
+                    </div>
+                    <div v-else-if="error" class="text-xs text-rose-400">
+                        Unable to load destination data.
+                    </div>
+                    <div v-else class="flex flex-col space-y-3">
+                        <!-- Search Box -->
+                        <DestinationSearch
+                            :destinations="filteredDestinations"
+                            :scenario="selectedScenario"
+                            :selected-destination-id="selectedDestinationId"
+                            @select-destination="handleSelectDestination"
+                            @clear-selection="selectedDestinationId = null"
+                        />
+
+                        <!-- Candidate Counter -->
+                        <div class="flex items-baseline space-x-2">
+                            <span class="text-2xl font-extrabold text-white">
+                                {{
+                                    filteredDestinations.length.toLocaleString()
+                                }}
                             </span>
-                            <span class="text-xl font-extrabold text-white">
-                                {{ modeledMaxDepthDisplay }}
+                            <span class="text-xs text-slate-400">
+                                {{
+                                    isFiltered
+                                        ? `of ${allDestinations.length.toLocaleString()}`
+                                        : 'candidates'
+                                }}
                             </span>
                         </div>
-                        <p class="text-[11px] leading-tight text-slate-400">
-                            Scenario-based flood visualization derivative.
+
+                        <p class="text-xs text-slate-400">
+                            {{
+                                isFiltered
+                                    ? `Showing ${filteredDestinations.length.toLocaleString()} of ${allDestinations.length.toLocaleString()}`
+                                    : `${allDestinations.length.toLocaleString()} destinations loaded`
+                            }}
                         </p>
                     </div>
                 </div>
+            </div>
 
-                <!-- Route Control Component -->
-                <RouteControl
-                    v-model:show-route="showRoute"
-                    :scenario="selectedScenario"
-                    :metadata="activeRouteMetadata"
-                    :comparison="routeComparisonData"
-                    :loading="routeLoading"
-                    :error="routeError"
-                />
+            <!-- 7. Destination Filters -->
+            <DestinationFilter
+                v-model:safety-filter="selectedSafetyFilter"
+                v-model:category-filter="selectedCategoryFilter"
+            />
 
-                <!-- Route Scenario Comparison Component -->
-                <RouteComparisonCard
-                    :comparison="routeComparisonData"
-                    :moderate-metadata="routeCache.moderate?.metadata || null"
-                    :severe-metadata="routeCache.severe?.metadata || null"
-                />
+            <!-- 8. Flood Status Legend (Collapsible) -->
+            <FloodLegend />
+        </aside>
 
-                <!-- Destinations Counter Summary Card -->
-                <div
-                    class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
-                >
-                    <div class="flex items-center justify-between">
-                        <h3
-                            class="text-sm font-semibold tracking-wider text-slate-300 uppercase"
-                        >
-                            Evacuation Destinations
-                        </h3>
-                        <span
-                            v-if="loading"
-                            class="rounded bg-slate-700 px-2 py-0.5 text-[10px] text-slate-300"
-                        >
-                            Loading...
-                        </span>
-                        <span
-                            v-else-if="error"
-                            class="rounded bg-rose-900/80 px-2 py-0.5 text-[10px] text-rose-200"
-                        >
-                            Error
-                        </span>
-                        <span
-                            v-else
-                            class="rounded border border-blue-800 bg-blue-950 px-2 py-0.5 text-[10px] font-semibold text-blue-300"
-                        >
-                            GeoJSON
-                        </span>
-                    </div>
-
-                    <div class="mt-3">
-                        <div
-                            v-if="loading"
-                            class="animate-pulse text-xs text-slate-400"
-                        >
-                            Loading destination data...
-                        </div>
-                        <div v-else-if="error" class="text-xs text-rose-400">
-                            Unable to load destination data.
-                        </div>
-                        <div v-else class="flex flex-col">
-                            <div class="flex items-baseline space-x-2">
-                                <span
-                                    class="text-2xl font-extrabold text-white"
-                                >
-                                    {{
-                                        filteredDestinations.length.toLocaleString()
-                                    }}
-                                </span>
-                                <span class="text-xs text-slate-400">
-                                    {{
-                                        isFiltered
-                                            ? `of ${allDestinations.length.toLocaleString()}`
-                                            : 'candidates'
-                                    }}
-                                </span>
-                            </div>
-
-                            <p class="mt-1 text-xs text-slate-400">
-                                {{
-                                    isFiltered
-                                        ? `Showing ${filteredDestinations.length.toLocaleString()} of ${allDestinations.length.toLocaleString()}`
-                                        : `${allDestinations.length.toLocaleString()} destinations loaded`
-                                }}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Destination Filters -->
-                <DestinationFilter
-                    v-model:safety-filter="selectedSafetyFilter"
-                    v-model:category-filter="selectedCategoryFilter"
-                />
-
-                <!-- Flood Status Legend -->
-                <FloodLegend />
-            </aside>
-
-            <!-- Map Viewport -->
-            <main class="relative min-h-0 flex-1">
-                <FloodMap
-                    :destinations="filteredDestinations"
-                    :scenario="selectedScenario"
-                    :loading="loading"
-                    :error="error || rasterError"
-                    :flood-metadata="activeMetadata"
-                    :flood-overlay-url="activeRasterUrl"
-                    :show-flood-raster="showFloodRaster"
-                    :raster-loading="rasterLoading"
-                    :route-geo-json="activeRouteGeoJson"
-                    :route-metadata="activeRouteMetadata"
-                    :show-route="showRoute"
-                    :route-loading="routeLoading"
-                    :route-error="routeError"
-                />
-            </main>
-        </div>
+        <!-- Map Viewport -->
+        <main
+            class="relative order-1 h-[55vh] min-h-[350px] flex-1 lg:order-2 lg:h-full lg:min-h-0"
+        >
+            <FloodMap
+                :destinations="filteredDestinations"
+                :scenario="selectedScenario"
+                :loading="loading"
+                :error="error || rasterError"
+                :flood-metadata="activeMetadata"
+                :flood-overlay-url="activeRasterUrl"
+                :show-flood-raster="showFloodRaster"
+                :raster-loading="rasterLoading"
+                :route-geo-json="activeRouteGeoJson"
+                :route-metadata="activeRouteMetadata"
+                :show-route="showRoute"
+                :route-loading="routeLoading"
+                :route-error="routeError"
+                :selected-destination-id="selectedDestinationId"
+            />
+        </main>
     </div>
 </template>

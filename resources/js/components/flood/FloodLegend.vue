@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import type { FloodSafetyStatus } from '@/types/destination';
 
 interface DepthLegendItem {
@@ -16,6 +17,8 @@ interface SafetyLegendItem {
     colorClass: string;
     borderClass: string;
 }
+
+const isCollapsed = ref<boolean>(false);
 
 const depthLegendItems: DepthLegendItem[] = [
     {
@@ -89,88 +92,115 @@ const safetyLegendItems: SafetyLegendItem[] = [
 
 <template>
     <div
-        class="space-y-4 rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
+        class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
     >
-        <!-- Disclaimer Header -->
-        <p class="text-[11px] leading-tight text-slate-400">
-            Note: Flood colors represent modeled flood depth visualization.
-            Destination safety status is a separate scenario-based hazard
-            classification.
-        </p>
+        <button
+            type="button"
+            class="flex w-full items-center justify-between border-b border-slate-700/60 pb-2 text-left focus:outline-none"
+            @click="isCollapsed = !isCollapsed"
+        >
+            <h3
+                class="text-xs font-semibold tracking-wider text-slate-300 uppercase"
+            >
+                Map Legend & Guidance
+            </h3>
+            <svg
+                :class="[
+                    'h-4 w-4 text-slate-400 transition-transform duration-200',
+                    isCollapsed ? 'rotate-180' : '',
+                ]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                />
+            </svg>
+        </button>
 
-        <!-- Section A: Flood Depth Visualization -->
-        <div>
-            <div class="mb-2 flex items-center justify-between">
-                <h3
-                    class="text-xs font-semibold tracking-wider text-slate-300 uppercase"
-                >
-                    Flood Depth Raster
-                </h3>
-                <span
-                    class="rounded bg-slate-700 px-1.5 py-0.5 text-[9px] text-slate-400"
-                >
-                    Raster Overlay
-                </span>
-            </div>
+        <div v-show="!isCollapsed" class="mt-3 space-y-4">
+            <!-- Disclaimer Header -->
+            <p class="text-[11px] leading-tight text-slate-400">
+                Note: Flood depth colors represent modeled flood depth
+                visualization. Destination safety status is a separate
+                scenario-based hazard classification.
+            </p>
 
-            <div class="space-y-1.5">
-                <div
-                    v-for="item in depthLegendItems"
-                    :key="item.name"
-                    class="flex items-center space-x-2.5 rounded-md border border-slate-700/40 bg-slate-900/40 p-1.5"
-                >
+            <!-- Section A: Flood Depth Visualization -->
+            <div>
+                <div class="mb-2 flex items-center justify-between">
+                    <h4 class="text-xs font-semibold text-slate-300">
+                        Flood Depth Raster
+                    </h4>
+                    <span
+                        class="rounded bg-slate-700 px-1.5 py-0.5 text-[9px] text-slate-400"
+                    >
+                        Raster Overlay
+                    </span>
+                </div>
+
+                <div class="space-y-1.5">
                     <div
-                        class="h-3.5 w-3.5 shrink-0 rounded-sm border shadow-sm"
-                        :style="`${item.bgStyle} ${item.borderStyle}`"
-                    ></div>
-                    <div class="flex flex-col">
-                        <span class="text-[11px] font-medium text-slate-200">{{
-                            item.label
-                        }}</span>
-                        <span class="text-[10px] text-slate-400">{{
-                            item.description
-                        }}</span>
+                        v-for="item in depthLegendItems"
+                        :key="item.name"
+                        class="flex items-center space-x-2.5 rounded-md border border-slate-700/40 bg-slate-900/40 p-1.5"
+                    >
+                        <div
+                            class="h-3.5 w-3.5 shrink-0 rounded-sm border shadow-sm"
+                            :style="`${item.bgStyle} ${item.borderStyle}`"
+                        ></div>
+                        <div class="flex flex-col">
+                            <span
+                                class="text-[11px] font-medium text-slate-200"
+                                >{{ item.label }}</span
+                            >
+                            <span class="text-[10px] text-slate-400">{{
+                                item.description
+                            }}</span>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Section B: Destination Safety Status -->
-        <div>
-            <div class="mb-2 flex items-center justify-between">
-                <h3
-                    class="text-xs font-semibold tracking-wider text-slate-300 uppercase"
-                >
-                    Destination Safety Status
-                </h3>
-                <span
-                    class="rounded bg-slate-700 px-1.5 py-0.5 text-[9px] text-slate-400"
-                >
-                    Point Markers
-                </span>
-            </div>
+            <!-- Section B: Destination Safety Status -->
+            <div>
+                <div class="mb-2 flex items-center justify-between">
+                    <h4 class="text-xs font-semibold text-slate-300">
+                        Destination Safety Status
+                    </h4>
+                    <span
+                        class="rounded bg-slate-700 px-1.5 py-0.5 text-[9px] text-slate-400"
+                    >
+                        Point Markers
+                    </span>
+                </div>
 
-            <div class="space-y-1.5">
-                <div
-                    v-for="item in safetyLegendItems"
-                    :key="item.status"
-                    class="flex items-center space-x-2.5 rounded-md border border-slate-700/40 bg-slate-900/40 p-1.5"
-                >
+                <div class="space-y-1.5">
                     <div
-                        :class="[
-                            'h-3.5 w-3.5 shrink-0 rounded-full border shadow-sm',
-                            item.colorClass,
-                            item.borderClass,
-                        ]"
-                    ></div>
-                    <div class="flex flex-col">
-                        <span
-                            class="text-[11px] font-semibold text-slate-200"
-                            >{{ item.label }}</span
-                        >
-                        <span class="text-[10px] text-slate-400">{{
-                            item.description
-                        }}</span>
+                        v-for="item in safetyLegendItems"
+                        :key="item.status"
+                        class="flex items-center space-x-2.5 rounded-md border border-slate-700/40 bg-slate-900/40 p-1.5"
+                    >
+                        <div
+                            :class="[
+                                'h-3.5 w-3.5 shrink-0 rounded-full border shadow-sm',
+                                item.colorClass,
+                                item.borderClass,
+                            ]"
+                        ></div>
+                        <div class="flex flex-col">
+                            <span
+                                class="text-[11px] font-semibold text-slate-200"
+                                >{{ item.label }}</span
+                            >
+                            <span class="text-[10px] text-slate-400">{{
+                                item.description
+                            }}</span>
+                        </div>
                     </div>
                 </div>
             </div>
