@@ -7,7 +7,7 @@ import type {
     FloodSafetyStatus,
 } from '@/types/destination';
 import type { FloodRasterMetadata } from '@/types/floodRaster';
-import type { RouteGeoJSON, RouteMetadata } from '@/types/route';
+import type { DestinationRouteArtifact, RouteDisplayMode } from '@/types/route';
 
 const props = withDefaults(
     defineProps<{
@@ -19,9 +19,9 @@ const props = withDefaults(
         floodOverlayUrl?: string | null;
         showFloodRaster?: boolean;
         rasterLoading?: boolean;
-        routeGeoJson?: RouteGeoJSON | null;
-        routeMetadata?: RouteMetadata | null;
-        showRoute?: boolean;
+        routeDisplayMode?: RouteDisplayMode;
+        selectedDestinationRouteModerate?: DestinationRouteArtifact | null;
+        selectedDestinationRouteSevere?: DestinationRouteArtifact | null;
         routeLoading?: boolean;
         routeError?: string | null;
         selectedDestinationId?: string | null;
@@ -35,22 +35,27 @@ const props = withDefaults(
         floodOverlayUrl: null,
         showFloodRaster: true,
         rasterLoading: false,
-        routeGeoJson: null,
-        routeMetadata: null,
-        showRoute: true,
+        routeDisplayMode: 'ACTIVE_SCENARIO',
+        selectedDestinationRouteModerate: null,
+        selectedDestinationRouteSevere: null,
         routeLoading: false,
         routeError: null,
         selectedDestinationId: null,
     },
 );
 
+const emit = defineEmits<{
+    (e: 'show-destination-route', facilityId: string): void;
+}>();
+
 const mapContainer = ref<HTMLDivElement | null>(null);
 let map: L.Map | null = null;
 let destinationLayerGroup: L.LayerGroup | null = null;
-let routeLayerGroup: L.LayerGroup | null = null;
+let moderateRouteLayerGroup: L.LayerGroup | null = null;
+let severeRouteLayerGroup: L.LayerGroup | null = null;
+let endpointLayerGroup: L.LayerGroup | null = null;
 let activeImageOverlay: L.ImageOverlay | null = null;
 
-// Lookup map for fast O(1) marker updates without recreating 1,248 markers
 const destinationMarkerMap = new Map<
     string,
     { marker: L.CircleMarker; feature: DestinationFeature }
@@ -135,6 +140,7 @@ function createPopupContent(
             : propsData.flood_safety_severe;
     const networkAccess = formatNetworkAccess(propsData.network_access_status);
     const roadDist = propsData.nearest_node_distance_m.toFixed(1);
+    const facilityId = propsData.facility_id;
 
     const safetyColorClass =
         safety === 'SAFE'
@@ -150,8 +156,11 @@ function createPopupContent(
 
     return `
         <div style="font-family: inherit; font-size: 12px; color: #0f172a; padding: 2px 0;">
-            <div style="font-weight: 700; font-size: 14px; margin-bottom: 6px; color: #0f172a;">
+            <div style="font-weight: 700; font-size: 14px; margin-bottom: 2px; color: #0f172a;">
                 ${name}
+            </div>
+            <div style="font-size: 10px; color: #64748b; margin-bottom: 6px; font-family: monospace;">
+                ${facilityId}
             </div>
             <div style="margin-bottom: 4px;">
                 <span style="color: #64748b; font-size: 11px;">Category:</span><br/>
@@ -163,11 +172,17 @@ function createPopupContent(
             </div>
             <div style="margin-bottom: 4px;">
                 <span style="color: #64748b; font-size: 11px;">Road Access:</span><br/>
-                <span style="font-weight: 500; color: #334155;">${networkAccess}</span>
+                <span style="font-weight: 500; color: #334155;">${networkAccess} (${roadDist} m)</span>
             </div>
-            <div>
-                <span style="color: #64748b; font-size: 11px;">Nearest Road:</span><br/>
-                <span style="font-weight: 600; color: #334155;">${roadDist} m</span>
+            <div style="margin-top: 8px;">
+                <button
+                    type="button"
+                    class="js-show-route-btn"
+                    data-facility-id="${facilityId}"
+                    style="width: 100%; background-color: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 11px; font-weight: 700; cursor: pointer;"
+                >
+                    Show Flood-Aware Route
+                </button>
             </div>
         </div>
     `;
@@ -197,98 +212,194 @@ function updateFloodOverlay(): void {
     }
 }
 
-function updateRouteLayer(): void {
-    if (!map || !routeLayerGroup) {
+function renderRouteLineString(
+    layerGroup: L.LayerGroup,
+    routeArtifact: DestinationRouteArtifact,
+    style: { casingColor: string; innerColor: string; dashArray?: string },
+): [number, number][] | null {
+    if (
+        !routeArtifact ||
+        !routeArtifact.reachable ||
+        !routeArtifact.geometry ||
+        !Array.isArray(routeArtifact.geometry.coordinates) ||
+        routeArtifact.geometry.coordinates.length < 2
+    ) {
+        return null;
+    }
+
+    const latLngs: [number, number][] = routeArtifact.geometry.coordinates.map(
+        (coord) => [coord[1], coord[0]],
+    );
+
+    const outerPolyline = L.polyline(latLngs, {
+        color: style.casingColor,
+        weight: 8,
+        opacity: 0.9,
+        lineCap: 'round',
+        lineJoin: 'round',
+    });
+
+    const innerPolyline = L.polyline(latLngs, {
+        color: style.innerColor,
+        weight: 4,
+        opacity: 1.0,
+        dashArray: style.dashArray,
+        lineCap: 'round',
+        lineJoin: 'round',
+    });
+
+    layerGroup.addLayer(outerPolyline);
+    layerGroup.addLayer(innerPolyline);
+
+    return latLngs;
+}
+
+function updateRouteLayers(): void {
+    if (
+        !map ||
+        !moderateRouteLayerGroup ||
+        !severeRouteLayerGroup ||
+        !endpointLayerGroup
+    ) {
         return;
     }
 
-    routeLayerGroup.clearLayers();
+    moderateRouteLayerGroup.clearLayers();
+    severeRouteLayerGroup.clearLayers();
+    endpointLayerGroup.clearLayers();
 
-    if (
-        props.showRoute &&
-        props.routeGeoJson &&
-        Array.isArray(props.routeGeoJson.features) &&
-        props.routeGeoJson.features.length > 0
-    ) {
-        props.routeGeoJson.features.forEach((feature) => {
-            if (
-                feature.geometry &&
-                feature.geometry.type === 'LineString' &&
-                Array.isArray(feature.geometry.coordinates) &&
-                feature.geometry.coordinates.length > 0
-            ) {
-                const latLngs: [number, number][] =
-                    feature.geometry.coordinates.map((coord) => [
-                        coord[1],
-                        coord[0],
-                    ]);
+    if (props.routeDisplayMode === 'HIDDEN') {
+        moderateRouteLayerGroup.remove();
+        severeRouteLayerGroup.remove();
+        endpointLayerGroup.remove();
 
-                const outerPolyline = L.polyline(latLngs, {
-                    color: '#0284c7',
-                    weight: 7,
-                    opacity: 0.9,
-                    lineCap: 'round',
-                    lineJoin: 'round',
-                });
-
-                const innerPolyline = L.polyline(latLngs, {
-                    color: '#38bdf8',
-                    weight: 4,
-                    opacity: 1.0,
-                    lineCap: 'round',
-                    lineJoin: 'round',
-                });
-
-                routeLayerGroup?.addLayer(outerPolyline);
-                routeLayerGroup?.addLayer(innerPolyline);
-
-                // Origin Marker
-                const startCoords = latLngs[0];
-                const originMarker = L.circleMarker(startCoords, {
-                    radius: 7,
-                    color: '#0284c7',
-                    fillColor: '#38bdf8',
-                    fillOpacity: 1,
-                    weight: 2,
-                });
-                originMarker.bindPopup(`
-                    <div style="font-family: inherit; font-size: 12px; padding: 2px 0;">
-                        <div style="font-weight: 700; font-size: 13px; color: #0f172a; margin-bottom: 2px;">
-                            Evacuation Origin
-                        </div>
-                        <div style="font-size: 11px; color: #64748b;">
-                            Starting node for scenario route
-                        </div>
-                    </div>
-                `);
-                routeLayerGroup?.addLayer(originMarker);
-
-                // Destination Endpoint Marker
-                const endCoords = latLngs[latLngs.length - 1];
-                const destMarker = L.circleMarker(endCoords, {
-                    radius: 7,
-                    color: '#059669',
-                    fillColor: '#10b981',
-                    fillOpacity: 1,
-                    weight: 2,
-                });
-                destMarker.bindPopup(`
-                    <div style="font-family: inherit; font-size: 12px; padding: 2px 0;">
-                        <div style="font-weight: 700; font-size: 13px; color: #0f172a; margin-bottom: 2px;">
-                            Potential Evacuation Destination
-                        </div>
-                        <div style="font-size: 11px; color: #64748b;">
-                            Target candidate facility
-                        </div>
-                    </div>
-                `);
-                routeLayerGroup?.addLayer(destMarker);
-            }
-        });
+        return;
     }
 
-    routeLayerGroup.remove();
-    routeLayerGroup.addTo(map);
+    const moderateStyle = {
+        casingColor: '#0284c7',
+        innerColor: '#38bdf8',
+        dashArray: undefined,
+    };
+
+    const severeStyle = {
+        casingColor: '#b91c1c',
+        innerColor: '#f87171',
+        dashArray: '8, 8',
+    };
+
+    let activeLatLngs: [number, number][] | null = null;
+
+    if (props.routeDisplayMode === 'ACTIVE_SCENARIO') {
+        if (
+            props.scenario === 'moderate' &&
+            props.selectedDestinationRouteModerate
+        ) {
+            activeLatLngs = renderRouteLineString(
+                moderateRouteLayerGroup,
+                props.selectedDestinationRouteModerate,
+                moderateStyle,
+            );
+            moderateRouteLayerGroup.addTo(map);
+            severeRouteLayerGroup.remove();
+        } else if (
+            props.scenario === 'severe' &&
+            props.selectedDestinationRouteSevere
+        ) {
+            activeLatLngs = renderRouteLineString(
+                severeRouteLayerGroup,
+                props.selectedDestinationRouteSevere,
+                severeStyle,
+            );
+            severeRouteLayerGroup.addTo(map);
+            moderateRouteLayerGroup.remove();
+        }
+    } else if (props.routeDisplayMode === 'COMPARE_BOTH') {
+        let modLatLngs: [number, number][] | null = null;
+        let sevLatLngs: [number, number][] | null = null;
+
+        if (props.selectedDestinationRouteModerate) {
+            modLatLngs = renderRouteLineString(
+                moderateRouteLayerGroup,
+                props.selectedDestinationRouteModerate,
+                moderateStyle,
+            );
+        }
+
+        if (props.selectedDestinationRouteSevere) {
+            sevLatLngs = renderRouteLineString(
+                severeRouteLayerGroup,
+                props.selectedDestinationRouteSevere,
+                severeStyle,
+            );
+        }
+
+        moderateRouteLayerGroup.addTo(map);
+        severeRouteLayerGroup.addTo(map);
+
+        activeLatLngs = sevLatLngs || modLatLngs;
+    }
+
+    // Render single non-duplicated Endpoint Markers if route geometry exists
+    if (activeLatLngs && activeLatLngs.length >= 2) {
+        // Red Pin Marker for Evacuation Origin
+        const startCoords = activeLatLngs[0];
+        const redOriginIcon = L.divIcon({
+            className: 'custom-red-origin-pin bg-transparent border-0',
+            html: `
+                <div style="position: relative; width: 32px; height: 42px; filter: drop-shadow(0px 3px 6px rgba(0,0,0,0.5));">
+                    <svg width="32" height="42" viewBox="0 0 32 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M16 0C7.16344 0 0 7.16344 0 16C0 28 16 42 16 42C16 42 32 28 32 16C32 7.16344 24.8366 0 16 0Z" fill="#B91C1C"/>
+                        <path d="M16 2C8.26801 2 2 8.26801 2 16C2 26.5 16 39.5 16 39.5C16 39.5 30 26.5 30 16C30 8.26801 23.732 2 16 2Z" fill="#EF4444"/>
+                        <circle cx="16" cy="15" r="6" fill="#FFFFFF"/>
+                        <circle cx="16" cy="15" r="3.5" fill="#7F1D1D"/>
+                    </svg>
+                </div>
+            `,
+            iconSize: [32, 42],
+            iconAnchor: [16, 42],
+            popupAnchor: [0, -42],
+        });
+
+        const originMarker = L.marker(startCoords, {
+            icon: redOriginIcon,
+            zIndexOffset: 1000,
+        });
+
+        originMarker.bindPopup(`
+            <div style="font-family: inherit; font-size: 12px; padding: 2px 0;">
+                <div style="font-weight: 700; font-size: 13px; color: #991b1b; margin-bottom: 2px;">
+                    Evacuation Origin
+                </div>
+                <div style="font-size: 11px; color: #64748b;">
+                    Fixed starting origin for evacuation routing
+                </div>
+            </div>
+        `);
+        endpointLayerGroup.addLayer(originMarker);
+
+        // Destination Endpoint Marker
+        const endCoords = activeLatLngs[activeLatLngs.length - 1];
+        const destMarker = L.circleMarker(endCoords, {
+            radius: 7,
+            color: '#059669',
+            fillColor: '#10b981',
+            fillOpacity: 1,
+            weight: 2,
+        });
+        destMarker.bindPopup(`
+            <div style="font-family: inherit; font-size: 12px; padding: 2px 0;">
+                <div style="font-weight: 700; font-size: 13px; color: #0f172a; margin-bottom: 2px;">
+                    Potential Evacuation Destination
+                </div>
+                <div style="font-size: 11px; color: #64748b;">
+                    Selected candidate facility
+                </div>
+            </div>
+        `);
+        endpointLayerGroup.addLayer(destMarker);
+        endpointLayerGroup.addTo(map);
+    }
 }
 
 function updateDestinationMarkers(): void {
@@ -348,7 +459,6 @@ function handleSelectionChange(newSelectedId: string | null): void {
         return;
     }
 
-    // Reset previous selection style
     if (currentlySelectedId && destinationMarkerMap.has(currentlySelectedId)) {
         const prev = destinationMarkerMap.get(currentlySelectedId)!;
         const safetyStatus =
@@ -368,7 +478,6 @@ function handleSelectionChange(newSelectedId: string | null): void {
 
     currentlySelectedId = newSelectedId;
 
-    // Apply highlight style & pan to selected marker
     if (newSelectedId && destinationMarkerMap.has(newSelectedId)) {
         const current = destinationMarkerMap.get(newSelectedId)!;
         const coords = current.feature.geometry.coordinates; // [lng, lat]
@@ -391,6 +500,18 @@ function handleSelectionChange(newSelectedId: string | null): void {
         current.marker.bringToFront();
         map.panTo(latLng);
         current.marker.openPopup();
+    }
+}
+
+function handlePopupClick(e: MouseEvent): void {
+    const target = e.target as HTMLElement;
+
+    if (target && target.classList.contains('js-show-route-btn')) {
+        const facilityId = target.getAttribute('data-facility-id');
+
+        if (facilityId) {
+            emit('show-destination-route', facilityId);
+        }
     }
 }
 
@@ -417,13 +538,20 @@ onMounted(() => {
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
 
-    routeLayerGroup = L.layerGroup().addTo(map);
+    moderateRouteLayerGroup = L.layerGroup().addTo(map);
+    severeRouteLayerGroup = L.layerGroup().addTo(map);
+    endpointLayerGroup = L.layerGroup().addTo(map);
     destinationLayerGroup = L.layerGroup().addTo(map);
 
     window.addEventListener('resize', handleResize);
 
+    // Event listener for popup action button
+    if (mapContainer.value) {
+        mapContainer.value.addEventListener('click', handlePopupClick);
+    }
+
     updateFloodOverlay();
-    updateRouteLayer();
+    updateRouteLayers();
     updateDestinationMarkers();
 
     if (props.selectedDestinationId) {
@@ -453,9 +581,14 @@ watch(
 );
 
 watch(
-    () => [props.routeGeoJson, props.showRoute],
+    () => [
+        props.selectedDestinationRouteModerate,
+        props.selectedDestinationRouteSevere,
+        props.routeDisplayMode,
+        props.scenario,
+    ],
     () => {
-        updateRouteLayer();
+        updateRouteLayers();
     },
     { deep: true },
 );
@@ -470,14 +603,28 @@ watch(
 onUnmounted(() => {
     window.removeEventListener('resize', handleResize);
 
+    if (mapContainer.value) {
+        mapContainer.value.removeEventListener('click', handlePopupClick);
+    }
+
     if (activeImageOverlay && map) {
         map.removeLayer(activeImageOverlay);
         activeImageOverlay = null;
     }
 
-    if (routeLayerGroup) {
-        routeLayerGroup.clearLayers();
-        routeLayerGroup = null;
+    if (moderateRouteLayerGroup) {
+        moderateRouteLayerGroup.clearLayers();
+        moderateRouteLayerGroup = null;
+    }
+
+    if (severeRouteLayerGroup) {
+        severeRouteLayerGroup.clearLayers();
+        severeRouteLayerGroup = null;
+    }
+
+    if (endpointLayerGroup) {
+        endpointLayerGroup.clearLayers();
+        endpointLayerGroup = null;
     }
 
     if (destinationLayerGroup) {

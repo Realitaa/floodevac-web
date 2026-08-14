@@ -1,19 +1,71 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import type { RouteComparison, RouteMetadata } from '@/types/route';
+import { computed, ref } from 'vue';
+import type { DestinationFeature } from '@/types/destination';
+import type {
+    DestinationRouteArtifact,
+    DestinationRouteComparison,
+    RouteDisplayMode,
+} from '@/types/route';
 
-defineProps<{
-    comparison: RouteComparison | null;
-    moderateMetadata: RouteMetadata | null;
-    severeMetadata: RouteMetadata | null;
+const props = defineProps<{
+    selectedDestination: DestinationFeature | null;
+    comparison: DestinationRouteComparison | null;
+    moderateArtifact: DestinationRouteArtifact | null;
+    severeArtifact: DestinationRouteArtifact | null;
+    displayMode?: RouteDisplayMode;
 }>();
 
 const isCollapsed = ref<boolean>(false);
+
+const comparisonBadgeText = computed(() => {
+    if (!props.comparison) {
+        return 'No Data';
+    }
+
+    if (props.comparison.became_unreachable) {
+        return 'Became Unreachable';
+    }
+
+    if (props.comparison.route_changed) {
+        return 'Route Changed';
+    }
+
+    if (
+        props.comparison.moderate_reachable &&
+        props.comparison.severe_reachable
+    ) {
+        return 'Route Stable';
+    }
+
+    return 'Unreachable';
+});
+
+const comparisonBadgeClass = computed(() => {
+    if (!props.comparison) {
+        return 'border border-slate-700 bg-slate-800 text-slate-400';
+    }
+
+    if (props.comparison.became_unreachable) {
+        return 'border border-rose-800 bg-rose-950 text-rose-300';
+    }
+
+    if (props.comparison.route_changed) {
+        return 'border border-amber-800 bg-amber-950 text-amber-300';
+    }
+
+    if (
+        props.comparison.moderate_reachable &&
+        props.comparison.severe_reachable
+    ) {
+        return 'border border-emerald-800 bg-emerald-950 text-emerald-300';
+    }
+
+    return 'border border-slate-700 bg-slate-950 text-slate-400';
+});
 </script>
 
 <template>
     <div
-        v-if="comparison"
         class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
     >
         <button
@@ -28,22 +80,13 @@ const isCollapsed = ref<boolean>(false);
                     Scenario Route Comparison
                 </h3>
                 <span
+                    v-if="selectedDestination && comparison"
                     :class="[
                         'rounded px-1.5 py-0.5 text-[9px] font-bold',
-                        comparison.became_unreachable
-                            ? 'border border-rose-800 bg-rose-950 text-rose-300'
-                            : comparison.route_changed
-                              ? 'border border-amber-800 bg-amber-950 text-amber-300'
-                              : 'border border-emerald-800 bg-emerald-950 text-emerald-300',
+                        comparisonBadgeClass,
                     ]"
                 >
-                    {{
-                        comparison.became_unreachable
-                            ? 'Became Unreachable'
-                            : comparison.route_changed
-                              ? 'Route Changed'
-                              : 'Route Unchanged'
-                    }}
+                    {{ comparisonBadgeText }}
                 </span>
             </div>
 
@@ -65,73 +108,131 @@ const isCollapsed = ref<boolean>(false);
             </svg>
         </button>
 
-        <div v-show="!isCollapsed" class="mt-3 space-y-2.5">
-            <!-- Moderate Scenario Line -->
+        <div v-show="!isCollapsed" class="mt-3 space-y-3">
+            <!-- Empty State -->
             <div
-                class="flex items-center justify-between rounded-lg bg-slate-900/50 p-2 text-xs"
+                v-if="!selectedDestination"
+                class="py-2 text-center text-xs text-slate-400"
             >
-                <div class="flex items-center space-x-2">
-                    <span class="h-2 w-2 rounded-full bg-amber-400"></span>
-                    <span class="font-medium text-slate-300">Moderate</span>
-                </div>
-                <span class="font-bold text-white">
-                    {{
-                        moderateMetadata
-                            ? `${moderateMetadata.distance_km.toFixed(2)} km · ${moderateMetadata.travel_time_min.toFixed(2)} min`
-                            : '--'
-                    }}
-                </span>
+                Select a destination to compare its routes.
             </div>
 
-            <!-- Severe Scenario Line -->
             <div
-                class="flex items-center justify-between rounded-lg bg-slate-900/50 p-2 text-xs"
+                v-else-if="!comparison"
+                class="py-2 text-center text-xs text-slate-400"
             >
-                <div class="flex items-center space-x-2">
-                    <span class="h-2 w-2 rounded-full bg-rose-500"></span>
-                    <span class="font-medium text-slate-300">Severe</span>
-                </div>
-                <span class="font-bold text-white">
-                    {{
-                        severeMetadata
-                            ? `${severeMetadata.distance_km.toFixed(2)} km · ${severeMetadata.travel_time_min.toFixed(2)} min`
-                            : '--'
-                    }}
-                </span>
+                Scenario comparison data unavailable for this destination.
             </div>
 
-            <!-- Difference Callout -->
-            <div
-                v-if="comparison.route_changed"
-                class="rounded-lg border border-slate-700 bg-slate-900/70 p-2 text-[11px]"
-            >
-                <span class="text-slate-400">Scenario Difference:</span>
+            <div v-else class="space-y-3">
+                <!-- Route Visual Style Legend -->
                 <div
-                    class="mt-1 flex items-center justify-between font-medium text-slate-200"
+                    class="flex items-center justify-around rounded-lg border border-slate-700/50 bg-slate-900/60 p-2 text-xs"
                 >
-                    <span
-                        >Distance: +{{
-                            comparison.distance_diff_m.toFixed(2)
+                    <div class="flex items-center space-x-2">
+                        <span class="inline-block h-0.5 w-6 bg-sky-400"></span>
+                        <span class="font-medium text-slate-300">Moderate</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span
+                            class="inline-block h-0.5 w-6 border-b-2 border-dashed border-rose-400"
+                        ></span>
+                        <span class="font-medium text-slate-300">Severe</span>
+                    </div>
+                </div>
+
+                <!-- Moderate Scenario Line -->
+                <div
+                    class="flex items-center justify-between rounded-lg bg-slate-900/50 p-2 text-xs"
+                >
+                    <div class="flex items-center space-x-2">
+                        <span class="h-2 w-2 rounded-full bg-sky-400"></span>
+                        <span class="font-medium text-slate-300">Moderate</span>
+                    </div>
+                    <span class="font-bold text-white">
+                        {{
+                            moderateArtifact && moderateArtifact.reachable
+                                ? `${moderateArtifact.route_distance_km?.toFixed(2)} km · ${moderateArtifact.estimated_travel_time_min?.toFixed(2)} min`
+                                : 'UNREACHABLE'
                         }}
-                        m</span
-                    >
-                    <span
-                        >Travel Time: +{{
-                            comparison.travel_time_diff_s
+                    </span>
+                </div>
+
+                <!-- Severe Scenario Line -->
+                <div
+                    class="flex items-center justify-between rounded-lg bg-slate-900/50 p-2 text-xs"
+                >
+                    <div class="flex items-center space-x-2">
+                        <span class="h-2 w-2 rounded-full bg-rose-400"></span>
+                        <span class="font-medium text-slate-300">Severe</span>
+                    </div>
+                    <span class="font-bold text-white">
+                        {{
+                            severeArtifact && severeArtifact.reachable
+                                ? `${severeArtifact.route_distance_km?.toFixed(2)} km · ${severeArtifact.estimated_travel_time_min?.toFixed(2)} min`
+                                : 'UNREACHABLE'
                         }}
-                        sec</span
+                    </span>
+                </div>
+
+                <!-- Difference Callout -->
+                <div
+                    v-if="
+                        comparison.route_changed &&
+                        comparison.moderate_reachable &&
+                        comparison.severe_reachable
+                    "
+                    class="rounded-lg border border-amber-800/60 bg-amber-950/40 p-2 text-[11px]"
+                >
+                    <span class="font-semibold text-amber-200">
+                        Route changes under Severe scenario:
+                    </span>
+                    <div
+                        class="mt-1 flex items-center justify-between font-medium text-amber-300"
                     >
+                        <span>
+                            Distance:
+                            {{
+                                comparison.distance_delta_m !== null
+                                    ? `+${comparison.distance_delta_m.toFixed(2)} m`
+                                    : '--'
+                            }}
+                        </span>
+                        <span>
+                            Travel Time:
+                            {{
+                                comparison.travel_time_delta_s !== null
+                                    ? `+${comparison.travel_time_delta_s} sec`
+                                    : '--'
+                            }}
+                        </span>
+                    </div>
+                </div>
+
+                <div
+                    v-else-if="comparison.became_unreachable"
+                    class="rounded-lg border border-rose-900/60 bg-rose-950/40 p-2 text-center text-[11px] text-rose-300"
+                >
+                    Accessibility is lost under Severe scenario.
+                </div>
+
+                <div
+                    v-else-if="
+                        !comparison.moderate_reachable &&
+                        !comparison.severe_reachable
+                    "
+                    class="rounded-lg border border-slate-700 bg-slate-900/60 p-2 text-center text-[11px] text-slate-400"
+                >
+                    Destination is unreachable in both scenarios.
+                </div>
+
+                <div
+                    v-else
+                    class="rounded-lg border border-slate-700 bg-slate-900/60 p-2 text-center text-[11px] text-slate-300"
+                >
+                    Route remains stable across scenarios.
                 </div>
             </div>
-
-            <!-- Reachability Summary -->
-            <p class="text-[11px] text-slate-400">
-                {{
-                    comparison.became_unreachable
-                        ? 'Route becomes unreachable under Severe flood scenario.'
-                        : 'Reachable in both Moderate and Severe scenarios.'
-                }}
-            </p>
         </div>
     </div>
 </template>

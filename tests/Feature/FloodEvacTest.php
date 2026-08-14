@@ -82,3 +82,28 @@ test('public route comparison JSON artifact exists and contains valid comparison
         ->and(isset($compData['distance_diff_m']))->toBeTrue()
         ->and(isset($compData['travel_time_diff_s']))->toBeTrue();
 });
+
+test('public per-destination route web artifacts exist and contain valid 1248 destination features without NaN/Infinity', function () {
+    $basePath = public_path('data/routes/destinations');
+
+    $files = [
+        'moderate' => $basePath.'/moderate.json',
+        'severe' => $basePath.'/severe.json',
+        'comparison' => $basePath.'/comparison.json',
+    ];
+
+    foreach ($files as $name => $path) {
+        expect(file_exists($path))->toBeTrue("Per-destination route artifact {$name}.json missing");
+
+        $rawContent = file_get_contents($path);
+        expect(str_contains($rawContent, 'NaN'))->toBeFalse("NaN literal found in {$name}.json");
+        expect(str_contains($rawContent, 'Infinity'))->toBeFalse("Infinity literal found in {$name}.json");
+
+        $data = json_decode($rawContent, true);
+        expect($data)->toBeArray()
+            ->and(count($data))->toBe(1248);
+
+        // Check sample facility fac_0001
+        expect(isset($data['fac_0001']))->toBeTrue("fac_0001 missing in {$name}.json");
+    }
+});

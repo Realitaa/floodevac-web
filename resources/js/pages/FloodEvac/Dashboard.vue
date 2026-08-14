@@ -9,6 +9,7 @@ import RouteComparisonCard from '@/components/flood/RouteComparison.vue';
 import RouteControl from '@/components/flood/RouteControl.vue';
 import ScenarioSelector from '@/components/flood/ScenarioSelector.vue';
 import type { FloodScenario } from '@/components/flood/ScenarioSelector.vue';
+import SelectedDestination from '@/components/flood/SelectedDestination.vue';
 import type {
     DestinationCategoryValue,
     DestinationFeature,
@@ -17,16 +18,16 @@ import type {
 } from '@/types/destination';
 import type { FloodRasterMetadata } from '@/types/floodRaster';
 import type {
-    RouteComparison as RouteComparisonType,
-    RouteGeoJSON,
-    RouteMetadata,
+    DestinationRouteArtifact,
+    DestinationRouteComparison,
+    RouteDisplayMode,
 } from '@/types/route';
 
 const selectedScenario = ref<FloodScenario>('moderate');
 const selectedSafetyFilter = ref<DestinationSafetyFilterValue>('ALL');
 const selectedCategoryFilter = ref<DestinationCategoryValue>('ALL');
 const showFloodRaster = ref<boolean>(true);
-const showRoute = ref<boolean>(true);
+const routeDisplayMode = ref<RouteDisplayMode>('ACTIVE_SCENARIO');
 const selectedDestinationId = ref<string | null>(null);
 
 const allDestinations = ref<DestinationFeature[]>([]);
@@ -44,26 +45,71 @@ const activeRasterUrl = ref<string | null>(null);
 const rasterLoading = ref<boolean>(false);
 const rasterError = ref<string | null>(null);
 
-// In-memory route artifact cache
-const routeCache = ref<
-    Record<
-        FloodScenario,
-        { geojson: RouteGeoJSON; metadata: RouteMetadata } | null
-    >
->({
-    moderate: null,
-    severe: null,
-});
+// In-memory route artifact indices per scenario
+const moderateRoutesIndex = ref<Record<
+    string,
+    DestinationRouteArtifact
+> | null>(null);
+const severeRoutesIndex = ref<Record<string, DestinationRouteArtifact> | null>(
+    null,
+);
+const comparisonIndex = ref<Record<string, DestinationRouteComparison> | null>(
+    null,
+);
 
-const routeComparisonData = ref<RouteComparisonType | null>(null);
-const activeRouteGeoJson = ref<RouteGeoJSON | null>(null);
-const activeRouteMetadata = ref<RouteMetadata | null>(null);
 const routeLoading = ref<boolean>(false);
 const routeError = ref<string | null>(null);
 
 const scenarioDisplayLabel = computed(() => {
     return selectedScenario.value === 'moderate' ? 'Moderate' : 'Severe';
 });
+
+const selectedDestinationFeature = computed<DestinationFeature | null>(() => {
+    if (!selectedDestinationId.value || allDestinations.value.length === 0) {
+        return null;
+    }
+
+    return (
+        allDestinations.value.find(
+            (f) => f.properties.facility_id === selectedDestinationId.value,
+        ) || null
+    );
+});
+
+const selectedDestinationRouteModerate =
+    computed<DestinationRouteArtifact | null>(() => {
+        if (!selectedDestinationId.value || !moderateRoutesIndex.value) {
+            return null;
+        }
+
+        return moderateRoutesIndex.value[selectedDestinationId.value] || null;
+    });
+
+const selectedDestinationRouteSevere =
+    computed<DestinationRouteArtifact | null>(() => {
+        if (!selectedDestinationId.value || !severeRoutesIndex.value) {
+            return null;
+        }
+
+        return severeRoutesIndex.value[selectedDestinationId.value] || null;
+    });
+
+const activeSelectedRouteArtifact = computed<DestinationRouteArtifact | null>(
+    () => {
+        return selectedScenario.value === 'moderate'
+            ? selectedDestinationRouteModerate.value
+            : selectedDestinationRouteSevere.value;
+    },
+);
+
+const activeSelectedRouteComparison =
+    computed<DestinationRouteComparison | null>(() => {
+        if (!selectedDestinationId.value || !comparisonIndex.value) {
+            return null;
+        }
+
+        return comparisonIndex.value[selectedDestinationId.value] || null;
+    });
 
 const modeledMaxDepthDisplay = computed(() => {
     if (
@@ -191,83 +237,115 @@ async function loadScenarioRaster(scenario: FloodScenario): Promise<void> {
     }
 }
 
-async function fetchRouteComparison(): Promise<void> {
-    if (routeComparisonData.value) {
+async function loadRouteIndex(scenario: FloodScenario): Promise<void> {
+    if (scenario === 'moderate' && moderateRoutesIndex.value) {
         return;
     }
 
-    try {
-        const response = await fetch('/data/routes/route_comparison.json');
-
-        if (response.ok) {
-            const data: RouteComparisonType = await response.json();
-
-            if (data && typeof data.route_changed === 'boolean') {
-                routeComparisonData.value = data;
-            }
-        }
-    } catch (err: unknown) {
-        console.error('Failed to load route comparison:', err);
-    }
-}
-
-async function loadScenarioRoute(scenario: FloodScenario): Promise<void> {
-    routeError.value = null;
-
-    if (routeCache.value[scenario]) {
-        activeRouteGeoJson.value = routeCache.value[scenario]!.geojson;
-        activeRouteMetadata.value = routeCache.value[scenario]!.metadata;
-
+    if (scenario === 'severe' && severeRoutesIndex.value) {
         return;
     }
 
     routeLoading.value = true;
+    routeError.value = null;
 
     try {
-        const [geoRes, metaRes] = await Promise.all([
-            fetch(`/data/routes/${scenario}/flood_aware_route.geojson`),
-            fetch(`/data/routes/${scenario}/route_metadata.json`),
-        ]);
+        const response = await fetch(
+            `/data/routes/destinations/${scenario}.json`,
+        );
 
-        if (!geoRes.ok || !metaRes.ok) {
-            throw new Error('HTTP error fetching route files');
+        if (!response.ok) {
+            throw new Error(`HTTP error ${response.status}`);
         }
 
-        const geojson: RouteGeoJSON = await geoRes.json();
-        const metadata: RouteMetadata = await metaRes.json();
+        const indexData: Record<string, DestinationRouteArtifact> =
+            await response.json();
 
-        if (
-            !geojson ||
-            geojson.type !== 'FeatureCollection' ||
-            !Array.isArray(geojson.features) ||
-            !metadata ||
-            typeof metadata.reachable !== 'boolean' ||
-            typeof metadata.distance_m !== 'number'
-        ) {
-            throw new Error('Malformed route artifact data');
+        if (scenario === 'moderate') {
+            moderateRoutesIndex.value = indexData;
+        } else {
+            severeRoutesIndex.value = indexData;
         }
-
-        routeCache.value[scenario] = { geojson, metadata };
-        activeRouteGeoJson.value = geojson;
-        activeRouteMetadata.value = metadata;
     } catch (err: unknown) {
-        console.error(`Failed to load route artifacts for ${scenario}:`, err);
-        routeError.value = 'Flood-Aware route unavailable.';
+        console.error(`Failed to load ${scenario} route index:`, err);
+        routeError.value = 'Route data is not available for this destination.';
     } finally {
         routeLoading.value = false;
     }
 }
 
+async function loadComparisonIndex(): Promise<void> {
+    if (comparisonIndex.value) {
+        return;
+    }
+
+    try {
+        const response = await fetch(
+            '/data/routes/destinations/comparison.json',
+        );
+
+        if (response.ok) {
+            const data: Record<string, DestinationRouteComparison> =
+                await response.json();
+            comparisonIndex.value = data;
+        }
+    } catch (err: unknown) {
+        console.error('Failed to load comparison index:', err);
+    }
+}
+
+async function ensureRoutesForDisplayMode(): Promise<void> {
+    if (routeDisplayMode.value === 'HIDDEN') {
+        return;
+    }
+
+    if (routeDisplayMode.value === 'ACTIVE_SCENARIO') {
+        await loadRouteIndex(selectedScenario.value);
+    } else if (routeDisplayMode.value === 'COMPARE_BOTH') {
+        await Promise.all([
+            loadRouteIndex('moderate'),
+            loadRouteIndex('severe'),
+            loadComparisonIndex(),
+        ]);
+    }
+}
+
 function handleSelectDestination(facilityId: string): void {
     selectedDestinationId.value = facilityId;
+
+    if (routeDisplayMode.value !== 'HIDDEN') {
+        ensureRoutesForDisplayMode();
+    }
+}
+
+function handleShowDestinationRoute(facilityId: string): void {
+    selectedDestinationId.value = facilityId;
+
+    if (routeDisplayMode.value === 'HIDDEN') {
+        routeDisplayMode.value = 'ACTIVE_SCENARIO';
+    }
+
+    ensureRoutesForDisplayMode();
+}
+
+function handleToggleRoute(): void {
+    if (routeDisplayMode.value === 'HIDDEN') {
+        routeDisplayMode.value = 'ACTIVE_SCENARIO';
+        ensureRoutesForDisplayMode();
+    } else {
+        routeDisplayMode.value = 'HIDDEN';
+    }
 }
 
 watch(selectedScenario, (newScenario) => {
     loadScenarioRaster(newScenario);
-    loadScenarioRoute(newScenario);
+    ensureRoutesForDisplayMode();
 });
 
-// Clear selectedDestinationId if filters exclude it
+watch(routeDisplayMode, () => {
+    ensureRoutesForDisplayMode();
+});
+
 watch([selectedSafetyFilter, selectedCategoryFilter, selectedScenario], () => {
     if (selectedDestinationId.value) {
         const stillVisible = filteredDestinations.value.some(
@@ -275,7 +353,7 @@ watch([selectedSafetyFilter, selectedCategoryFilter, selectedScenario], () => {
         );
 
         if (!stillVisible) {
-            selectedDestinationId.value = null;
+            // Keep selectedDestinationId set per specs, but notice will show if filtered out
         }
     }
 });
@@ -283,8 +361,8 @@ watch([selectedSafetyFilter, selectedCategoryFilter, selectedScenario], () => {
 onMounted(() => {
     fetchDestinations();
     loadScenarioRaster(selectedScenario.value);
-    loadScenarioRoute(selectedScenario.value);
-    fetchRouteComparison();
+    ensureRoutesForDisplayMode();
+    loadComparisonIndex();
 });
 </script>
 
@@ -437,24 +515,38 @@ onMounted(() => {
                 </div>
             </div>
 
-            <!-- 4. Route Control Component -->
-            <RouteControl
-                v-model:show-route="showRoute"
+            <!-- 4. Selected Destination Card -->
+            <SelectedDestination
+                :destination="selectedDestinationFeature"
                 :scenario="selectedScenario"
-                :metadata="activeRouteMetadata"
-                :comparison="routeComparisonData"
+                :route-shown="routeDisplayMode !== 'HIDDEN'"
+                @toggle-route="handleToggleRoute"
+                @clear-selection="selectedDestinationId = null"
+            />
+
+            <!-- 5. Route Control Component -->
+            <RouteControl
+                v-model:display-mode="routeDisplayMode"
+                :selected-destination="selectedDestinationFeature"
+                :scenario="selectedScenario"
+                :route-artifact="activeSelectedRouteArtifact"
+                :comparison="activeSelectedRouteComparison"
+                :moderate-artifact="selectedDestinationRouteModerate"
+                :severe-artifact="selectedDestinationRouteSevere"
                 :loading="routeLoading"
                 :error="routeError"
             />
 
-            <!-- 5. Route Scenario Comparison Component (Collapsible) -->
+            <!-- 6. Route Scenario Comparison Component (Collapsible) -->
             <RouteComparisonCard
-                :comparison="routeComparisonData"
-                :moderate-metadata="routeCache.moderate?.metadata || null"
-                :severe-metadata="routeCache.severe?.metadata || null"
+                :selected-destination="selectedDestinationFeature"
+                :comparison="activeSelectedRouteComparison"
+                :moderate-artifact="selectedDestinationRouteModerate"
+                :severe-artifact="selectedDestinationRouteSevere"
+                :display-mode="routeDisplayMode"
             />
 
-            <!-- 6. Evacuation Destinations Search & Counter Card -->
+            <!-- 7. Evacuation Destinations Search & Counter Card -->
             <div
                 class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
             >
@@ -531,13 +623,13 @@ onMounted(() => {
                 </div>
             </div>
 
-            <!-- 7. Destination Filters -->
+            <!-- 8. Destination Filters -->
             <DestinationFilter
                 v-model:safety-filter="selectedSafetyFilter"
                 v-model:category-filter="selectedCategoryFilter"
             />
 
-            <!-- 8. Flood Status Legend (Collapsible) -->
+            <!-- 9. Flood Status Legend (Collapsible) -->
             <FloodLegend />
         </aside>
 
@@ -554,12 +646,17 @@ onMounted(() => {
                 :flood-overlay-url="activeRasterUrl"
                 :show-flood-raster="showFloodRaster"
                 :raster-loading="rasterLoading"
-                :route-geo-json="activeRouteGeoJson"
-                :route-metadata="activeRouteMetadata"
-                :show-route="showRoute"
+                :route-display-mode="routeDisplayMode"
+                :selected-destination-route-moderate="
+                    selectedDestinationRouteModerate
+                "
+                :selected-destination-route-severe="
+                    selectedDestinationRouteSevere
+                "
                 :route-loading="routeLoading"
                 :route-error="routeError"
                 :selected-destination-id="selectedDestinationId"
+                @show-destination-route="handleShowDestinationRoute"
             />
         </main>
     </div>
