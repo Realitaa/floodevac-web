@@ -4,6 +4,8 @@ import { computed, onMounted, ref, watch } from 'vue';
 import DestinationFilter from '@/components/flood/DestinationFilter.vue';
 import FloodLegend from '@/components/flood/FloodLegend.vue';
 import FloodMap from '@/components/flood/FloodMap.vue';
+import RouteComparisonCard from '@/components/flood/RouteComparison.vue';
+import RouteControl from '@/components/flood/RouteControl.vue';
 import ScenarioSelector from '@/components/flood/ScenarioSelector.vue';
 import type { FloodScenario } from '@/components/flood/ScenarioSelector.vue';
 import type {
@@ -13,11 +15,17 @@ import type {
     DestinationSafetyFilterValue,
 } from '@/types/destination';
 import type { FloodRasterMetadata } from '@/types/floodRaster';
+import type {
+    RouteComparison as RouteComparisonType,
+    RouteGeoJSON,
+    RouteMetadata,
+} from '@/types/route';
 
 const selectedScenario = ref<FloodScenario>('moderate');
 const selectedSafetyFilter = ref<DestinationSafetyFilterValue>('ALL');
 const selectedCategoryFilter = ref<DestinationCategoryValue>('ALL');
 const showFloodRaster = ref<boolean>(true);
+const showRoute = ref<boolean>(true);
 
 const allDestinations = ref<DestinationFeature[]>([]);
 const loading = ref<boolean>(true);
@@ -33,6 +41,23 @@ const activeMetadata = ref<FloodRasterMetadata | null>(null);
 const activeRasterUrl = ref<string | null>(null);
 const rasterLoading = ref<boolean>(false);
 const rasterError = ref<string | null>(null);
+
+// In-memory route artifact cache
+const routeCache = ref<
+    Record<
+        FloodScenario,
+        { geojson: RouteGeoJSON; metadata: RouteMetadata } | null
+    >
+>({
+    moderate: null,
+    severe: null,
+});
+
+const routeComparisonData = ref<RouteComparisonType | null>(null);
+const activeRouteGeoJson = ref<RouteGeoJSON | null>(null);
+const activeRouteMetadata = ref<RouteMetadata | null>(null);
+const routeLoading = ref<boolean>(false);
+const routeError = ref<string | null>(null);
 
 const scenarioDisplayLabel = computed(() => {
     return selectedScenario.value === 'moderate' ? 'Moderate' : 'Severe';
@@ -134,7 +159,6 @@ async function fetchDestinations(): Promise<void> {
 async function loadScenarioRaster(scenario: FloodScenario): Promise<void> {
     rasterError.value = null;
 
-    // Check in-memory metadata cache first
     if (rasterCache.value[scenario]) {
         activeMetadata.value = rasterCache.value[scenario];
         activeRasterUrl.value = `/data/flood/${scenario}/flood_depth_web.png`;
@@ -165,13 +189,84 @@ async function loadScenarioRaster(scenario: FloodScenario): Promise<void> {
     }
 }
 
+async function fetchRouteComparison(): Promise<void> {
+    if (routeComparisonData.value) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/data/routes/route_comparison.json');
+
+        if (response.ok) {
+            const data: RouteComparisonType = await response.json();
+
+            if (data && typeof data.route_changed === 'boolean') {
+                routeComparisonData.value = data;
+            }
+        }
+    } catch (err: unknown) {
+        console.error('Failed to load route comparison:', err);
+    }
+}
+
+async function loadScenarioRoute(scenario: FloodScenario): Promise<void> {
+    routeError.value = null;
+
+    if (routeCache.value[scenario]) {
+        activeRouteGeoJson.value = routeCache.value[scenario]!.geojson;
+        activeRouteMetadata.value = routeCache.value[scenario]!.metadata;
+
+        return;
+    }
+
+    routeLoading.value = true;
+
+    try {
+        const [geoRes, metaRes] = await Promise.all([
+            fetch(`/data/routes/${scenario}/flood_aware_route.geojson`),
+            fetch(`/data/routes/${scenario}/route_metadata.json`),
+        ]);
+
+        if (!geoRes.ok || !metaRes.ok) {
+            throw new Error('HTTP error fetching route files');
+        }
+
+        const geojson: RouteGeoJSON = await geoRes.json();
+        const metadata: RouteMetadata = await metaRes.json();
+
+        // Runtime validation
+        if (
+            !geojson ||
+            geojson.type !== 'FeatureCollection' ||
+            !Array.isArray(geojson.features) ||
+            !metadata ||
+            typeof metadata.reachable !== 'boolean' ||
+            typeof metadata.distance_m !== 'number'
+        ) {
+            throw new Error('Malformed route artifact data');
+        }
+
+        routeCache.value[scenario] = { geojson, metadata };
+        activeRouteGeoJson.value = geojson;
+        activeRouteMetadata.value = metadata;
+    } catch (err: unknown) {
+        console.error(`Failed to load route artifacts for ${scenario}:`, err);
+        routeError.value = 'Flood-Aware route unavailable.';
+    } finally {
+        routeLoading.value = false;
+    }
+}
+
 watch(selectedScenario, (newScenario) => {
     loadScenarioRaster(newScenario);
+    loadScenarioRoute(newScenario);
 });
 
 onMounted(() => {
     fetchDestinations();
     loadScenarioRaster(selectedScenario.value);
+    loadScenarioRoute(selectedScenario.value);
+    fetchRouteComparison();
 });
 </script>
 
@@ -302,6 +397,23 @@ onMounted(() => {
                     </div>
                 </div>
 
+                <!-- Route Control Component -->
+                <RouteControl
+                    v-model:show-route="showRoute"
+                    :scenario="selectedScenario"
+                    :metadata="activeRouteMetadata"
+                    :comparison="routeComparisonData"
+                    :loading="routeLoading"
+                    :error="routeError"
+                />
+
+                <!-- Route Scenario Comparison Component -->
+                <RouteComparisonCard
+                    :comparison="routeComparisonData"
+                    :moderate-metadata="routeCache.moderate?.metadata || null"
+                    :severe-metadata="routeCache.severe?.metadata || null"
+                />
+
                 <!-- Destinations Counter Summary Card -->
                 <div
                     class="rounded-xl border border-slate-700 bg-slate-800/80 p-4 shadow-lg backdrop-blur-sm"
@@ -392,6 +504,11 @@ onMounted(() => {
                     :flood-overlay-url="activeRasterUrl"
                     :show-flood-raster="showFloodRaster"
                     :raster-loading="rasterLoading"
+                    :route-geo-json="activeRouteGeoJson"
+                    :route-metadata="activeRouteMetadata"
+                    :show-route="showRoute"
+                    :route-loading="routeLoading"
+                    :route-error="routeError"
                 />
             </main>
         </div>

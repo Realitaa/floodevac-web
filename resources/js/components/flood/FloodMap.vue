@@ -7,6 +7,7 @@ import type {
     FloodSafetyStatus,
 } from '@/types/destination';
 import type { FloodRasterMetadata } from '@/types/floodRaster';
+import type { RouteGeoJSON, RouteMetadata } from '@/types/route';
 
 const props = withDefaults(
     defineProps<{
@@ -18,6 +19,11 @@ const props = withDefaults(
         floodOverlayUrl?: string | null;
         showFloodRaster?: boolean;
         rasterLoading?: boolean;
+        routeGeoJson?: RouteGeoJSON | null;
+        routeMetadata?: RouteMetadata | null;
+        showRoute?: boolean;
+        routeLoading?: boolean;
+        routeError?: string | null;
     }>(),
     {
         destinations: () => [],
@@ -28,12 +34,18 @@ const props = withDefaults(
         floodOverlayUrl: null,
         showFloodRaster: true,
         rasterLoading: false,
+        routeGeoJson: null,
+        routeMetadata: null,
+        showRoute: true,
+        routeLoading: false,
+        routeError: null,
     },
 );
 
 const mapContainer = ref<HTMLDivElement | null>(null);
 let map: L.Map | null = null;
 let destinationLayerGroup: L.LayerGroup | null = null;
+let routeLayerGroup: L.LayerGroup | null = null;
 let activeImageOverlay: L.ImageOverlay | null = null;
 
 const MEDAN_CENTER: [number, number] = [3.5952, 98.6722];
@@ -152,11 +164,12 @@ function createPopupContent(
     `;
 }
 
-function updateFloodOverlay(): void {
+function updateLayers(): void {
     if (!map) {
         return;
     }
 
+    // 1. Update Flood Overlay
     if (activeImageOverlay) {
         map.removeLayer(activeImageOverlay);
         activeImageOverlay = null;
@@ -173,50 +186,140 @@ function updateFloodOverlay(): void {
             opacity: 0.85,
         });
         activeImageOverlay.addTo(map);
+    }
 
-        // Ensure markers sit above the raster overlay
-        if (destinationLayerGroup) {
-            destinationLayerGroup.remove();
-            destinationLayerGroup.addTo(map);
+    // 2. Update Route Layer Group
+    if (routeLayerGroup) {
+        routeLayerGroup.clearLayers();
+
+        if (
+            props.showRoute &&
+            props.routeGeoJson &&
+            Array.isArray(props.routeGeoJson.features) &&
+            props.routeGeoJson.features.length > 0
+        ) {
+            props.routeGeoJson.features.forEach((feature) => {
+                if (
+                    feature.geometry &&
+                    feature.geometry.type === 'LineString' &&
+                    Array.isArray(feature.geometry.coordinates) &&
+                    feature.geometry.coordinates.length > 0
+                ) {
+                    // Convert GeoJSON [lng, lat] to Leaflet [lat, lng]
+                    const latLngs: [number, number][] =
+                        feature.geometry.coordinates.map((coord) => [
+                            coord[1],
+                            coord[0],
+                        ]);
+
+                    // Outer Casing for high-visibility contrast
+                    const outerPolyline = L.polyline(latLngs, {
+                        color: '#0284c7',
+                        weight: 7,
+                        opacity: 0.9,
+                        lineCap: 'round',
+                        lineJoin: 'round',
+                    });
+
+                    // Inner Line
+                    const innerPolyline = L.polyline(latLngs, {
+                        color: '#38bdf8',
+                        weight: 4,
+                        opacity: 1.0,
+                        lineCap: 'round',
+                        lineJoin: 'round',
+                    });
+
+                    routeLayerGroup?.addLayer(outerPolyline);
+                    routeLayerGroup?.addLayer(innerPolyline);
+
+                    // Origin Endpoint Marker
+                    const startCoords = latLngs[0];
+                    const originMarker = L.circleMarker(startCoords, {
+                        radius: 7,
+                        color: '#0284c7',
+                        fillColor: '#38bdf8',
+                        fillOpacity: 1,
+                        weight: 2,
+                    });
+                    originMarker.bindPopup(`
+                        <div style="font-family: inherit; font-size: 12px; padding: 2px 0;">
+                            <div style="font-weight: 700; font-size: 13px; color: #0f172a; margin-bottom: 2px;">
+                                Evacuation Origin
+                            </div>
+                            <div style="font-size: 11px; color: #64748b;">
+                                Starting node for scenario route
+                            </div>
+                        </div>
+                    `);
+                    routeLayerGroup?.addLayer(originMarker);
+
+                    // Destination Endpoint Marker
+                    const endCoords = latLngs[latLngs.length - 1];
+                    const destMarker = L.circleMarker(endCoords, {
+                        radius: 7,
+                        color: '#059669',
+                        fillColor: '#10b981',
+                        fillOpacity: 1,
+                        weight: 2,
+                    });
+                    destMarker.bindPopup(`
+                        <div style="font-family: inherit; font-size: 12px; padding: 2px 0;">
+                            <div style="font-weight: 700; font-size: 13px; color: #0f172a; margin-bottom: 2px;">
+                                Potential Evacuation Destination
+                            </div>
+                            <div style="font-size: 11px; color: #64748b;">
+                                Target candidate facility
+                            </div>
+                        </div>
+                    `);
+                    routeLayerGroup?.addLayer(destMarker);
+                }
+            });
         }
-    }
-}
 
-function updateDestinationMarkers(): void {
-    if (!destinationLayerGroup) {
-        return;
+        // Re-add routeLayerGroup to map to preserve z-index order above flood overlay
+        routeLayerGroup.remove();
+        routeLayerGroup.addTo(map);
     }
 
-    destinationLayerGroup.clearLayers();
+    // 3. Update Destination Markers (sit above route layer)
+    if (destinationLayerGroup) {
+        destinationLayerGroup.clearLayers();
 
-    if (!props.destinations || props.destinations.length === 0) {
-        return;
+        if (props.destinations && props.destinations.length > 0) {
+            props.destinations.forEach((feature) => {
+                const coords = feature.geometry.coordinates; // [lng, lat]
+                const latLng: [number, number] = [coords[1], coords[0]];
+
+                const safetyStatus =
+                    props.scenario === 'moderate'
+                        ? feature.properties.flood_safety_moderate
+                        : feature.properties.flood_safety_severe;
+
+                const style = getStatusStyle(safetyStatus);
+
+                const marker = L.circleMarker(latLng, {
+                    radius: 5,
+                    color: style.color,
+                    fillColor: style.fillColor,
+                    fillOpacity: 0.85,
+                    weight: 1.5,
+                });
+
+                const popupContent = createPopupContent(
+                    feature,
+                    props.scenario,
+                );
+                marker.bindPopup(popupContent, { maxWidth: 260 });
+
+                destinationLayerGroup?.addLayer(marker);
+            });
+        }
+
+        destinationLayerGroup.remove();
+        destinationLayerGroup.addTo(map);
     }
-
-    props.destinations.forEach((feature) => {
-        const coords = feature.geometry.coordinates; // [lng, lat]
-        const latLng: [number, number] = [coords[1], coords[0]];
-
-        const safetyStatus =
-            props.scenario === 'moderate'
-                ? feature.properties.flood_safety_moderate
-                : feature.properties.flood_safety_severe;
-
-        const style = getStatusStyle(safetyStatus);
-
-        const marker = L.circleMarker(latLng, {
-            radius: 5,
-            color: style.color,
-            fillColor: style.fillColor,
-            fillOpacity: 0.85,
-            weight: 1.5,
-        });
-
-        const popupContent = createPopupContent(feature, props.scenario);
-        marker.bindPopup(popupContent, { maxWidth: 260 });
-
-        destinationLayerGroup?.addLayer(marker);
-    });
 }
 
 function handleResize(): void {
@@ -242,31 +345,26 @@ onMounted(() => {
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
 
+    routeLayerGroup = L.layerGroup().addTo(map);
     destinationLayerGroup = L.layerGroup().addTo(map);
 
     window.addEventListener('resize', handleResize);
 
-    updateFloodOverlay();
-    updateDestinationMarkers();
+    updateLayers();
 });
 
 watch(
-    () => [props.destinations, props.scenario],
-    () => {
-        updateDestinationMarkers();
-    },
-    { deep: true },
-);
-
-watch(
     () => [
+        props.destinations,
+        props.scenario,
         props.floodMetadata,
         props.floodOverlayUrl,
         props.showFloodRaster,
-        props.scenario,
+        props.routeGeoJson,
+        props.showRoute,
     ],
     () => {
-        updateFloodOverlay();
+        updateLayers();
     },
     { deep: true },
 );
@@ -277,6 +375,11 @@ onUnmounted(() => {
     if (activeImageOverlay && map) {
         map.removeLayer(activeImageOverlay);
         activeImageOverlay = null;
+    }
+
+    if (routeLayerGroup) {
+        routeLayerGroup.clearLayers();
+        routeLayerGroup = null;
     }
 
     if (destinationLayerGroup) {
@@ -297,7 +400,7 @@ onUnmounted(() => {
 
         <!-- Overlay Status Notification -->
         <div
-            v-if="loading || rasterLoading"
+            v-if="loading || rasterLoading || routeLoading"
             class="absolute top-4 right-4 z-[1000] flex items-center space-x-2 rounded-lg border border-slate-700 bg-slate-900/90 px-3 py-2 text-xs font-medium text-slate-200 shadow-xl backdrop-blur"
         >
             <svg
@@ -322,15 +425,17 @@ onUnmounted(() => {
             <span>{{
                 loading
                     ? 'Loading destinations...'
-                    : 'Loading flood scenario...'
+                    : rasterLoading
+                      ? 'Loading flood scenario...'
+                      : 'Loading route...'
             }}</span>
         </div>
 
         <div
-            v-else-if="error"
+            v-else-if="error || routeError"
             class="absolute top-4 right-4 z-[1000] flex items-center space-x-2 rounded-lg border border-rose-800/80 bg-rose-950/90 px-3 py-2 text-xs font-medium text-rose-200 shadow-xl backdrop-blur"
         >
-            <span>{{ error }}</span>
+            <span>{{ error || routeError }}</span>
         </div>
     </div>
 </template>

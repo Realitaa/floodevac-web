@@ -1,0 +1,13 @@
+{
+  "objective": "FLOOD_AWARE",
+  "moderate_reachable": true,
+  "severe_reachable": true,
+  "route_changed": true,
+  "became_unreachable": false,
+  "distance_diff_m": 6.14,
+  "distance_diff_km": 0.01,
+  "travel_time_diff_s": 50.0,
+  "travel_time_diff_min": 0.83,
+  "flood_exposed_length_diff_m": 0.0,
+  "scientific_disclaimer": "The web route GeoJSON is a visualization derivative of the FloodEvac routing result. It is not an independent routing calculation."
+}

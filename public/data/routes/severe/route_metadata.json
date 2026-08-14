@@ -1,0 +1,17 @@
+{
+  "scenario": "severe",
+  "objective": "FLOOD_AWARE",
+  "origin_node": "node_465373.90_394232.40",
+  "destination_node": "node_465432.95_388497.42",
+  "reachable": true,
+  "distance_m": 7636.6,
+  "distance_km": 7.64,
+  "travel_time_s": 705.9,
+  "travel_time_min": 11.76,
+  "flood_exposed_length_m": 0.0,
+  "flood_exposed_ratio": 0.0,
+  "max_flood_depth_m": 0.0,
+  "max_slope_percent": 11.79,
+  "traversed_edge_count": 149,
+  "scientific_disclaimer": "The web route GeoJSON is a visualization derivative of the FloodEvac routing result. It is not an independent routing calculation."
+}
