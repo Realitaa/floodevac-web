@@ -1,0 +1,118 @@
+{
+  "scenario": "moderate",
+  "source_path": "/home/realitaa/code/floodevac-artifact/floodevac/data/processed/flood/moderate/flood_depth.tif",
+  "source_crs": "EPSG:32647",
+  "source_bounds": [
+    460169.72149560973,
+    381200.9291135618,
+    469285.925012475,
+    418511.83304337075
+  ],
+  "source_resolution": [
+    8.29499865046885,
+    8.29499865046886
+  ],
+  "source_width": 1099,
+  "source_height": 4498,
+  "source_dtype": "float32",
+  "source_nodata": -9999.0,
+  "valid_min_depth_m": 0.0,
+  "valid_max_depth_m": 15.792522430419922,
+  "web_crs": "EPSG:4326",
+  "web_bounds": [
+    98.64127992675552,
+    3.448702590862982,
+    98.72350565928062,
+    3.7863082444788057
+  ],
+  "leaflet_bounds": [
+    [
+      3.448702590862982,
+      98.64127992675552
+    ],
+    [
+      3.7863082444788057,
+      98.72350565928062
+    ]
+  ],
+  "web_width": 1096,
+  "web_height": 4500,
+  "transformation_method": "Resampling.bilinear reprojection from EPSG:32647 to EPSG:4326 + depth-binned RGBA image overlay",
+  "compression": "PNG lossless compression (web image) / LZW (web GeoTIFF)",
+  "generated_file_size_bytes": {
+    "png": 257298,
+    "tif": 3716273
+  },
+  "generated_file_size_kb": {
+    "png": 251.27,
+    "tif": 3629.17
+  },
+  "visualization_legend": [
+    {
+      "name": "negligible",
+      "min_depth_m": 0.0,
+      "max_depth_m": 0.05,
+      "rgba": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "hex": "#00000000",
+      "description": "0 / negligible depth -> transparent"
+    },
+    {
+      "name": "shallow",
+      "min_depth_m": 0.05,
+      "max_depth_m": 0.5,
+      "rgba": [
+        147,
+        197,
+        253,
+        180
+      ],
+      "hex": "#93C5FDB4",
+      "description": "shallow flooding -> light blue"
+    },
+    {
+      "name": "moderate",
+      "min_depth_m": 0.5,
+      "max_depth_m": 1.5,
+      "rgba": [
+        59,
+        130,
+        246,
+        200
+      ],
+      "hex": "#3B82F6C8",
+      "description": "moderate flooding -> stronger blue"
+    },
+    {
+      "name": "deep",
+      "min_depth_m": 1.5,
+      "max_depth_m": 3.0,
+      "rgba": [
+        29,
+        78,
+        216,
+        220
+      ],
+      "hex": "#1D4ED8DC",
+      "description": "deep flooding -> deep blue"
+    },
+    {
+      "name": "severe_deep",
+      "min_depth_m": 3.0,
+      "max_depth_m": null,
+      "rgba": [
+        88,
+        28,
+        135,
+        230
+      ],
+      "hex": "#581C87E6",
+      "description": "severe deep flooding -> dark blue/purple"
+    }
+  ],
+  "scientific_disclaimer": "The web artifact is a visualization derivative. The original flood_depth.tif remains the authoritative scientific raster."
+}
